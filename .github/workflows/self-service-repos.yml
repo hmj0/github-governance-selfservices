@@ -1,0 +1,137 @@
+name: self-service-repos
+
+on:
+  pull_request:
+    paths:
+      - "repos.yaml"
+      - "*.tf"
+  push:
+    branches: [main]
+    paths:
+      - "repos.yaml"
+      - "*.tf"
+
+permissions:
+  contents: read
+  pull-requests: write   # nécessaire pour poster le commentaire sur la PR
+
+env:
+  TF_VAR_github_org: ${{ vars.GH_ORG }}       # pas de terraform.tfvars en CI (gitignored)
+  TF_INPUT: "false"                            # échoue au lieu d'attendre une saisie
+  TF_CLOUD_ORGANIZATION: ${{ vars.HCP_ORG }}
+  TF_TOKEN_app_terraform_io: ${{ secrets.HCP_TERRAFORM_TOKEN }}
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # historique complet nécessaire pour le diff ci-dessous
+
+      # Échange l'identité du GitHub App contre un token installation,
+      # valable 1h, scopé exactement aux permissions données à l'App.
+      - name: Générer un token GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      # Regarde uniquement les lignes ajoutées/modifiées dans repos.yaml sur
+      # cette PR, et en extrait les team_owner concernés — pour ne notifier
+      # que les équipes réellement touchées par CE changement précis, pas
+      # toutes les équipes qui ont un jour un repo dans le fichier.
+      - name: Déterminer les équipes concernées par ce changement
+        id: affected-teams
+        run: |
+          TEAMS=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- repos.yaml \
+            | grep '^+.*team_owner:' \
+            | sed -E 's/.*team_owner:[[:space:]]*"?([a-zA-Z0-9_-]+)"?.*/\1/' \
+            | sort -u | tr '\n' ' ')
+          echo "teams=$TEAMS" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: true   # capture stdout dans steps.*.outputs
+
+      - name: Terraform Init
+        run: terraform init
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        continue-on-error: true
+
+      - name: Publier le plan en commentaire de la PR
+        uses: actions/github-script@v9
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+          TEAMS: ${{ steps.affected-teams.outputs.teams }}
+        with:
+          script: |
+            const org = context.repo.owner;
+            const teams = process.env.TEAMS.trim().split(/\s+/).filter(Boolean);
+            // team_owner utilise des noms courts ("dev") ; le vrai slug de
+            // la team est préfixé ("team-dev") — même correspondance que
+            // dans repos.tf.
+            const mentions = teams.map(t => `@${org}/team-${t}`).join(' ');
+            const mentionLine = mentions ? `\n\n${mentions} — ce changement touche votre équipe.` : '';
+
+            const output = `#### Terraform Plan 📖
+            <details><summary>Afficher le plan complet</summary>
+
+            \`\`\`
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>${mentionLine}`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Échouer si le plan a échoué
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Générer un token GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform Init
+        run: terraform init
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

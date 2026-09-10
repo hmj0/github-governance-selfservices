@@ -1,0 +1,70 @@
+name: drift-detection-selfservice
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  TF_VAR_github_org: ${{ vars.GH_ORG }}
+  TF_INPUT: "false"
+  TF_CLOUD_ORGANIZATION: ${{ vars.HCP_ORG }}
+  TF_TOKEN_app_terraform_io: ${{ secrets.HCP_TERRAFORM_TOKEN }}
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Générer un token GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: true
+
+      - name: Terraform Init
+        run: terraform init
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Terraform Plan (lecture seule)
+        id: plan
+        run: terraform plan -no-color -detailed-exitcode
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        continue-on-error: true
+
+      - name: Ouvrir/mettre à jour une alerte si dérive détectée
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v9
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const title = "⚠️ Dérive détectée — Self-service";
+            const body = `Le plan quotidien a détecté une différence entre le state et l'état réel sur GitHub.\n\n<details><summary>Voir le plan complet</summary>\n\n\`\`\`\n${process.env.PLAN}\n\`\`\`\n</details>`;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "drift"
+            });
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ["drift"] });
+            }
+
+      - name: Échouer si erreur réelle (pas juste une dérive)
+        if: steps.plan.outputs.exitcode != '0' && steps.plan.outputs.exitcode != '2'
+        run: exit 1

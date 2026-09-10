@@ -1,0 +1,33 @@
+# Répertoires locaux Terraform (plugins, modules téléchargés)
+**/.terraform/*
+
+# Fichiers d'état — ne doivent jamais être commités (state distant = source de vérité)
+*.tfstate
+*.tfstate.*
+
+# Fichiers de crash Terraform
+crash.log
+crash.*.log
+
+# Fichiers de valeurs — contiennent potentiellement des infos sensibles ou propres à ta machine
+*.tfvars
+*.tfvars.json
+# (terraform.tfvars.example n'est PAS concerné par ce motif : il reste versionné)
+
+# Fichiers d'override locaux (bypass volontaire de ressources en dev)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Sorties de "terraform plan -out=..."
+*tfplan*
+*.tfplan
+
+# Configuration CLI locale (peut contenir des identifiants)
+.terraformrc
+terraform.rc
+
+# Fichiers d'éditeur / OS
+.DS_Store
+.vscode/

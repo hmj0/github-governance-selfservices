@@ -1,0 +1,24 @@
+repositories:
+  poc-service-api:
+    team_owner: dev
+    visibility: private
+    description: "Premier repo test du circuit self-service"
+    topics: ["poc", "self-service"]
+    data_classification: interne
+    criticality: faible
+
+  poc-ml-pipeline:
+    team_owner: ia-ing
+    visibility: private
+    description: "Deuxième repo test, pour valider le pipeline CI/CD de bout en bout"
+    topics: ["poc", "ml"]
+    data_classification: interne
+    criticality: faible
+
+  poc-ma-pipeline:
+    team_owner: ia-ing
+    visibility: private
+    description: "Deuxième repo test, pour valider le pipeline CI/CD de bout en bout"
+    topics: ["poc", "ml"]
+    data_classification: interne
+    criticality: faible
