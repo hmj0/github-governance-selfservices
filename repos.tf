@@ -81,3 +81,44 @@ resource "github_repository_custom_property" "this" {
     prevent_destroy = true
   }
 }
+
+# Fichiers de gouvernance/hygiène propagés à chaque repo créé, lus depuis
+# leur propre copie dans CE dépôt (self-services) — modifier une de ces
+# copies et appliquer met à jour l'ensemble des repos gérés en une fois,
+# sans toucher à repos.yaml. Un for_each combiné (repo × fichier) plutôt
+# que trois ressources dupliquées : ajouter un futur 4e fichier ne demande
+# qu'une ligne dans local.propagated_files, pas un nouveau bloc de code.
+locals {
+  propagated_files = {
+    "pr-agent.yml"   = ".github/workflows/pr-agent.yml"
+    "dependabot.yml" = ".github/dependabot.yml"
+    "pin-actions.yml" = ".github/workflows/pin-actions.yml"
+  }
+
+  # Aplatit repo × fichier en une seule map : "poc-service-api:pr-agent.yml" => {...}
+  repo_files = merge([
+    for repo_name, repo in local.repos : {
+      for file_key, file_path in local.propagated_files :
+      "${repo_name}:${file_key}" => {
+        repo = repo_name
+        path = file_path
+      }
+    }
+  ]...)
+}
+
+resource "github_repository_file" "propagated" {
+  for_each = local.repo_files
+
+  repository          = github_repository.this[each.value.repo].name
+  branch              = "main"
+  file                = each.value.path
+  content             = file("${path.module}/${each.value.path}")
+  commit_message      = "Ajout automatique des fichiers de gouvernance self-service"
+  overwrite_on_create = true
+
+  # Volontairement SANS lifecycle prevent_destroy — voir Annexe J.31 :
+  # ces fichiers sont des conforts/garde-fous recréés à la prochaine
+  # dérive s'ils disparaissent, pas des ressources de gouvernance
+  # critiques comme le repo, l'accès d'équipe ou les custom properties.
+}

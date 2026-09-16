@@ -1,0 +1,52 @@
+name: pin-actions
+
+# Volontairement pas déclenché sur push touchant .github/workflows/** :
+# la PR ouverte par ce workflow toucherait elle-même ce dossier, ce qui
+# re-déclencherait le workflow en boucle. Une cadence hebdomadaire, plus
+# un déclenchement manuel possible, suffit largement — l'objectif est de
+# rattraper une action non épinglée ajoutée entre-temps, pas de réagir
+# à la seconde près.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # tous les lundis, avant le passage de Dependabot
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      # Ces deux actions sont volontairement laissées en tag ici, pas en
+      # SHA — les remplacer par un SHA deviné à la main serait exactement
+      # l'erreur que cet outil existe pour éviter (voir le vrai incident
+      # sur actions/checkout, où le tag v4.0.0 a été déplacé vers un autre
+      # commit après coup : github.com/actions/checkout/issues/1573).
+      # Exécute ce workflow une première fois manuellement une fois posé :
+      # il s'épinglera lui-même, avec un SHA réellement vérifié auprès de
+      # l'API GitHub au moment de l'exécution, pas deviné.
+      - uses: actions/checkout@v4
+      - name: Épingler les actions non encore épinglées (tag → SHA)
+        run: npx pin-github-action .github/workflows/
+        env:
+          # Sans jeton, l'outil interroge l'API GitHub sans authentification
+          # et atteint vite la limite de débit — un jeton, même celui fourni
+          # automatiquement, suffit à lever cette limite.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ouvrir une pull request si des actions ont été épinglées
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: épingler les actions GitHub Actions non épinglées sur un SHA"
+          title: "Épinglage des actions GitHub Actions sur leur SHA exact"
+          body: |
+            Généré automatiquement par pin-github-action (https://www.npmjs.com/package/pin-github-action).
+
+            Remplace toute référence par tag mutable (@v4, @main...) par le
+            SHA exact du commit correspondant, avec le tag d'origine conservé
+            en commentaire — Dependabot prendra ensuite le relais pour
+            proposer les mises à jour de ce SHA au fil des nouvelles versions.
+          branch: "chore/pin-github-actions"
+          delete-branch: true
