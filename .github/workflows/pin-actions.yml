@@ -27,7 +27,7 @@ jobs:
       # Exécute ce workflow une première fois manuellement une fois posé :
       # il s'épinglera lui-même, avec un SHA réellement vérifié auprès de
       # l'API GitHub au moment de l'exécution, pas deviné.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Épingler les actions non encore épinglées (tag → SHA)
         run: npx pin-github-action .github/workflows/
         env:
@@ -37,7 +37,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ouvrir une pull request si des actions ont été épinglées
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore: épingler les actions GitHub Actions non épinglées sur un SHA"
           title: "Épinglage des actions GitHub Actions sur leur SHA exact"
